@@ -154,6 +154,7 @@ namespace TankEngine
                 game_ptr->Survivor().SetVal(Consoden::TankGame::Winner::Draw);
                 SetWinner(game_ptr);
                 StopGame();
+
                 if (gm.MissilesLeft()) {
                     mMissileCleanupRunning = true;
                     ScheduleMissileCleanup();
@@ -230,19 +231,20 @@ namespace TankEngine
                         boost::static_pointer_cast<Consoden::TankGame::GameState>(m_connection.Read(m_GameEntityId).GetEntity());
 
                     GameMap gm(game_ptr);
-                    gm.MoveMissiles();
-                    gm.MoveRedeemers();
+                    //gm.MoveMissiles();
+                    //gm.MoveRedeemers();
+                    gm.ClearMissilesAndRedeemers();
 
                     game_ptr->Counter() = game_ptr->Counter() + 1;
 
-                    m_connection.SetChanges(game_ptr, m_GameEntityId.GetInstanceId(), m_HandlerId);        
+                    m_connection.SetChanges(game_ptr, m_GameEntityId.GetInstanceId(), m_HandlerId);
 
-                    if (gm.MissilesLeft() || gm.RedeemersLeft()) {
-                        ScheduleMissileCleanup();
-                    } else {
+                    //if (gm.MissilesLeft() || gm.RedeemersLeft()) {
+                    //    ScheduleMissileCleanup();
+                    //} else {
                         // We are done
                         mMissileCleanupRunning = false;
-                    }
+                    //}
                 }
             } else {
                 Safir::Logging::SendSystemLog(Safir::Logging::Critical,
@@ -408,7 +410,8 @@ namespace TankEngine
 
 
         gm.MoveMissiles();
-        gm.MoveRedeemers();
+       //gm.MoveRedeemers();
+
         bool tank_tank_collission = false;
 
         //Decrement redeemer counter
@@ -416,15 +419,35 @@ namespace TankEngine
         for (Safir::Dob::Typesystem::ArrayIndex redeemer_index = 0;
              (redeemer_index < game_ptr->RedeemersArraySize());
              redeemer_index++) {
-
         	if(!game_ptr->Redeemers()[redeemer_index].IsNull()){
     			Consoden::TankGame::RedeemerPtr redeemer =
     			                boost::static_pointer_cast<Consoden::TankGame::Redeemer>(game_ptr->Redeemers()[redeemer_index].GetPtr());
+	            Consoden::TankGame::TankPtr tank_ptr =
+	                boost::static_pointer_cast<Consoden::TankGame::Tank>(game_ptr->Tanks()[redeemer->TankId()].GetPtr());
 
-        		if(game_ptr->Redeemers()[redeemer_index].GetPtr()->TimeToExplosion() <= 1){//Needs to be done when timer is 1 to mitigate for delayed updates
+	            if(redeemer->InFlames()){
+    				game_ptr->Redeemers()[redeemer_index].SetNull();
+    				break;
+    			}
+
+    			if(gm.WallSquare(redeemer->PosX(),redeemer->PosY())){
+					detonateRedeemer(game_ptr, redeemer, &gm, 1);
+					redeemer->InFlames() = true;
+
+		            tank_ptr->RedeemerTimerLeft() = 0;
+		            redeemer->TimeToExplosion()=0;
+					break;
+    			}
+    			gm.MoveRedeemer(redeemer_index);
+    			if(game_ptr->Redeemers()[redeemer_index].IsNull()){  //redeemer may have been removed when updating position
+    				tank_ptr->RedeemerTimerLeft() = 0;
+    				continue;
+    			}
+        		if(game_ptr->Redeemers()[redeemer_index].GetPtr()->TimeToExplosion() <= 1){	//Needs to be done when timer is 1 to mitigate for delayed updates
         			if(gm.OnBoard(redeemer->PosX(),redeemer->PosY())){
 						detonateRedeemer(game_ptr, redeemer, &gm, 1);
 						redeemer->InFlames() = true;
+
         			}else{
         				game_ptr->Redeemers()[redeemer_index].SetNull();
         			}
@@ -433,6 +456,8 @@ namespace TankEngine
         		}
         	}
         }
+
+
 
         CWG::DudePtr dude_ptr = game_ptr->TheDude().GetPtr();
         dudeUpdater(dude_ptr,gm,game_ptr);
@@ -738,23 +763,8 @@ namespace TankEngine
             //We might need to have this before any movement for the detector to work
             if ((gm.DudeSquare(tank_ptr->PosX().GetVal(), tank_ptr->PosY().GetVal()) || collisonDetector(dude_ptr,tank_ptr) )&& !dude_ptr->Dying() ) {
             	dude_ptr->Dying().SetVal(true);
-                AddPoints(m_config.m_dude_penalty, tank_ptr->TankId(), game_ptr);
+                AddPoints(m_config.m_dude_penalty, (tank_index+1) % 2, game_ptr);
             }
-            /*
-            //Here we do some horrible int and bool conversion :(
-            int killer_id1 = gm.HitByMissile(dude_ptr->PosX(),dude_ptr->PosY());
-            int killer_id2 = gm.MoveAgainstMissile(dude_ptr->PosX(),dude_ptr->PosY(),dude_ptr->Direction());
-            if((bool)killer_id1 || (bool)killer_id2){
-            	dude_ptr->Dying() = true;
-
-
-            	if((bool)killer_id1){
-            		AddPoints(m_config.m_dude_penalty, killer_id1, game_ptr);
-            	}else if((bool)killer_id2){
-            		AddPoints(m_config.m_dude_penalty, killer_id2, game_ptr);
-            	}
-            }
-            */
 
             // Stepped on mine
             if (gm.MineSquare(tank_ptr->PosX().GetVal(), tank_ptr->PosY().GetVal())) {
@@ -828,6 +838,9 @@ namespace TankEngine
             }
         }
 
+
+
+
         // Check for game termination states
         bool player_one_in_flames = true;
         bool player_two_in_flames = true;
@@ -859,6 +872,7 @@ namespace TankEngine
             game_ptr->Survivor().SetVal(Consoden::TankGame::Winner::Draw);
             SetWinner(game_ptr);
             StopGame();
+
             if (gm.MissilesLeft() || gm.RedeemersLeft()) {
                 mMissileCleanupRunning = true;
                 ScheduleMissileCleanup();
@@ -961,10 +975,10 @@ namespace TankEngine
     			return true;
     		}else if(x_pos == own_tank->PosX() && y_pos == own_tank->PosY()){
     			return true;
-    		}else if(x_pos == game_ptr->TheDude().GetPtr()->PosX() && y_pos == game_ptr->TheDude().GetPtr()->PosY()){
+    		}else if(x_pos == game_ptr->TheDude().GetPtr()->PosX() && y_pos == game_ptr->TheDude().GetPtr()->PosY() && !game_ptr->TheDude().GetPtr()->Dying()){
     			game_ptr->TheDude().GetPtr()->Dying() = true;
     			game_ptr->TheDude().GetPtr()->StopInstantly() = true;
-    			AddPoints(m_config.m_dude_penalty,own_tank->TankId(),game_ptr);
+    			AddPoints(m_config.m_dude_penalty,enemy_tank->TankId(),game_ptr);
     		}
 
     	}
@@ -1147,29 +1161,23 @@ namespace TankEngine
     void Engine::detonateRedeemer(Consoden::TankGame::GameStatePtr game_ptr, Consoden::TankGame::RedeemerPtr redeemer_ptr, GameMap* gm, int radius){
     	int center_x = redeemer_ptr->PosX();
     	int center_y = redeemer_ptr->PosY();
-    	CWG::TankPtr tank_0= game_ptr->Tanks()[0].GetPtr();
-    	CWG::TankPtr tank_1= game_ptr->Tanks()[1].GetPtr();
-    	int tank_0_x = tank_0->PosX();
-    	int tank_0_y = tank_0->PosY();
-    	int tank_1_x = tank_1->PosX();
-    	int tank_1_y = tank_1->PosY();
+    	CWG::TankPtr own= game_ptr->Tanks()[redeemer_ptr->TankId()].GetPtr();
+    	CWG::TankPtr enemy= game_ptr->Tanks()[(redeemer_ptr->TankId() + 1)  %2].GetPtr();
+    	int own_x = own->PosX();
+    	int own_y = own->PosY();
+    	int enemy_x = enemy->PosX();
+    	int enemy_y = enemy->PosY();
 
     	for(int y_pos = center_y - radius; y_pos <= center_y + radius; y_pos++){
         	for(int x_pos = center_x - radius; x_pos <= center_x + radius; x_pos++){
 
-        		if(x_pos == tank_0_x && y_pos == tank_0_y && !tank_0->InFlames()){
-        			tank_0->InFlames() = true;
+        		if(x_pos == own_x && y_pos == own_y && !own->InFlames()){
+        			own->InFlames() = true;
+         		}
 
-        			if(tank_0->TankId() != redeemer_ptr->TankId()){
-        				AddPoints(m_config.m_hit_points,redeemer_ptr->TankId(), game_ptr);
-        			}
-        		}
-
-        		if(x_pos == tank_1_x && y_pos == tank_1_y && !tank_1->InFlames()){
-					tank_1->InFlames() = true;
-					if(tank_1->TankId() != redeemer_ptr->TankId()){
-						AddPoints(m_config.m_hit_points,redeemer_ptr->TankId(), game_ptr);
-					}
+        		if(x_pos == enemy_x && y_pos == enemy_y && !enemy->InFlames()){
+					enemy->InFlames() = true;
+					AddPoints(m_config.m_hit_points,redeemer_ptr->TankId(), game_ptr);
 				}
 
         		if(gm->WallSquare(x_pos,y_pos) || gm->MineSquare(x_pos,y_pos) ){
@@ -1177,10 +1185,10 @@ namespace TankEngine
 
         		}
 
-        		if(x_pos == game_ptr->TheDude().GetPtr()->PosX() && y_pos == game_ptr->TheDude().GetPtr()->PosY()){
+        		if(x_pos == game_ptr->TheDude().GetPtr()->PosX() && y_pos == game_ptr->TheDude().GetPtr()->PosY() && !game_ptr->TheDude().GetPtr()->Dying()){
         			game_ptr->TheDude().GetPtr()->Dying() = true;
         			game_ptr->TheDude().GetPtr()->StopInstantly() = true;
-        			AddPoints(m_config.m_dude_penalty,redeemer_ptr->TankId(), game_ptr);
+        			AddPoints(m_config.m_dude_penalty,(redeemer_ptr->TankId() + 1) % 2, game_ptr);
         		}
 
         	}

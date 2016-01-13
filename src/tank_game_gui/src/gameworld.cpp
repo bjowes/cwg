@@ -336,7 +336,7 @@ void GameWorld::DrawLaser(const Consoden::TankGame::TankPtr& tank,const Board& b
     qreal y_pos = t.position.y();
 
 
-    double laser_delay = 0.25;
+    double laser_delay = 1.5;
 
 
     qreal rot = 0;
@@ -595,8 +595,7 @@ void GameWorld::Update(const Consoden::TankGame::GameStatePtr &game)
 
     }
 
-    UpdateMissiles(game);
-    UpdateRedeemers(game);
+
 
     //We need to do a special check is the tanks are colliding with eachother.
     //If we don't do this the collision s will be completely wrong since the second tank may
@@ -612,6 +611,8 @@ void GameWorld::Update(const Consoden::TankGame::GameStatePtr &game)
 		UpdateTankWrapping(tank0_ptr, tank0);
 		UpdateTankWrapping(tank1_ptr, tank1);
 
+	    UpdateMissiles(game);
+	    UpdateRedeemers(game, boardParser);
 
 		if(tank0.explosion == NotInFlames && tank1.explosion == NotInFlames &&
 				tank0_ptr->HitTank().IsNull() == false  && tank0_ptr->HitTank() == true &&
@@ -635,6 +636,10 @@ void GameWorld::Update(const Consoden::TankGame::GameStatePtr &game)
 
 		}
     }
+
+
+
+
 
 
     //Update if game is finished and if we have a winner
@@ -737,7 +742,7 @@ void GameWorld::Update()
 			}else if(tank.deathCause == tank.Death::HitTank){
 				UpdatePositionNoOvershoot(timeToNextUpdate, movement, tank,false);
 			}else if(tank.deathCause == tank.Death::HitMissile ){
-				UpdatePositionNoOvershoot(timeToNextUpdate, movement, tank,false);
+				UpdatePosition(timeToNextUpdate, movement, tank,true);
 			}else{
 				UpdatePosition(timeToNextUpdate, movement, tank);
 			}
@@ -810,9 +815,9 @@ void GameWorld::Update()
         if (missile.paintFire && missile.moveDirection != None)
         {
 
-            if(m_matchState.gameState.tanks[missile.tankId].explosion != NotInFlames || m_matchState.gameState.tanks[(missile.tankId + 1) % 2].explosion != NotInFlames){
-            	break;
-            }
+            //if(m_matchState.gameState.tanks[missile.tankId].explosion != NotInFlames || m_matchState.gameState.tanks[(missile.tankId + 1) % 2].explosion != NotInFlames){
+            //	break;
+            //}
 
             QPointF flame_pos  = tank.position+directionToVector(tank.towerDirection);
             bool into_wall = false;
@@ -867,8 +872,6 @@ void GameWorld::Update()
             }
             if(into_wall){
             	m_sprites.push_back(Sprite(m_explosion, missile.position, nextUpdate, 1));
-            }else{
-            	m_sprites.push_back(Sprite(m_explosion, missile.position-directionToVector(missile.moveDirection), nextUpdate, 1));
             }
 
             missile.explosion=Burning;
@@ -1279,9 +1282,6 @@ inline void GameWorld::UpdateMissiles(const Consoden::TankGame::GameStatePtr &ga
 
 		const Consoden::TankGame::MissileConstPtr& missile=game->Missiles()[i].GetPtr();
 
-
-
-
 		if(m_matchState.gameState.missiles.find(missile->MissileId().GetVal()) == m_matchState.gameState.missiles.end()){
 			if(m_matchState.gameState.tanks[0].explosion != NotInFlames || m_matchState.gameState.tanks[1].explosion != NotInFlames){
 
@@ -1295,9 +1295,6 @@ inline void GameWorld::UpdateMissiles(const Consoden::TankGame::GameStatePtr &ga
 				m.explosion=NotInFlames;
 				m.visible=false;
 				m.paintFire=true;
-
-
-				//m.moveDirection=ToDirection(missile->Direction());
 
 				if (missile->InFlames().GetVal()){
 					m.explosion = (m.explosion == NotInFlames) ? SetInFlames : Burning;
@@ -1330,14 +1327,11 @@ inline void GameWorld::UpdateMissiles(const Consoden::TankGame::GameStatePtr &ga
 
 				m.moveDirection=ToDirection(missile->Direction());
 			}
-
-
 		}
-
 	}
 }
 
-inline void GameWorld::UpdateRedeemers(const Consoden::TankGame::GameStatePtr &game){
+inline void GameWorld::UpdateRedeemers(const Consoden::TankGame::GameStatePtr &game,Board board){
     //Remove redeemers that are removed and be a tautology
 
     for (RedeemerMap::const_iterator it=m_matchState.gameState.redeemers.begin(); it!=m_matchState.gameState.redeemers.end(); )
@@ -1373,7 +1367,7 @@ inline void GameWorld::UpdateRedeemers(const Consoden::TankGame::GameStatePtr &g
 
 		const Consoden::TankGame::RedeemerConstPtr& redeemer=game->Redeemers()[i].GetPtr();
 		if(m_matchState.gameState.redeemers.find(redeemer->RedeemerId().GetVal()) == m_matchState.gameState.redeemers.end()){
-			if(m_matchState.gameState.tanks[0].explosion != NotInFlames && m_matchState.gameState.tanks[1].explosion != NotInFlames){
+			if(m_matchState.gameState.tanks[0].explosion != NotInFlames || m_matchState.gameState.tanks[1].explosion != NotInFlames){
 				continue;
 			}else{
 
@@ -1389,6 +1383,18 @@ inline void GameWorld::UpdateRedeemers(const Consoden::TankGame::GameStatePtr &g
 				r.time_to_Explosion = redeemer->TimeToExplosion().GetVal();
 
 				r.moveDirection=ToDirection(redeemer->Direction());
+
+
+				if(board.isWall(r.position.x(),r.position.y())){
+					//Welcome to the land of the glourious workarounds!
+	                m_eventQueue.insert(WorldEvents::value_type(m_matchState.gameState.lastUpdate+m_matchState.gameState.pace, [&]
+	                {
+	                	BadassExplosion(r, m_c.m_redeemer_radius);
+	                    r.explosion = SetInFlames;
+	    				r.visible = false;
+	                }));
+
+				}
 				if (redeemer->InFlames().GetVal()){
 					r.visible = false;
 
@@ -1405,11 +1411,20 @@ inline void GameWorld::UpdateRedeemers(const Consoden::TankGame::GameStatePtr &g
 			r.paintPosition=r.position;
 			r.position=QPointF(redeemer->PosX().GetVal(), redeemer->PosY().GetVal());
 
-			r.visible=true;
+			if(r.explosion == NotInFlames){r.visible=true;}
 			r.time_to_Explosion--;
+			if(board.isWall(r.position.x(),r.position.y())){
+				//Welcome to the land of the glourious workarounds!
+                m_eventQueue.insert(WorldEvents::value_type(m_matchState.gameState.lastUpdate+m_matchState.gameState.pace, [&]
+                {
+                	BadassExplosion(r, m_c.m_redeemer_radius);
+                    r.explosion = SetInFlames;
+    				r.visible = false;
+                }));
 
-
-			if(r.time_to_Explosion == 0  && r.explosion != SetInFlames){
+                continue;
+			}
+			if((r.time_to_Explosion == 0  && r.explosion != SetInFlames)){
 				BadassExplosion(r, m_c.m_redeemer_radius);
 				r.explosion = SetInFlames;
 				r.visible = false;

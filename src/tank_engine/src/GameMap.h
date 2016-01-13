@@ -41,10 +41,15 @@ namespace TankEngine
         int  MoveAgainstMissile(int pos_x, int pos_y, Consoden::TankGame::Direction::Enumeration move_direction);
         void MoveMissiles();
         void MoveRedeemers();
+        void ClearMissilesAndRedeemers();
+        void MoveRedeemer(Safir::Dob::Typesystem::ArrayIndex redeemer_index);
         bool MissilesLeft();
         bool RedeemersLeft();
         bool FireRedeemer(int pos_x, int pos_y, Consoden::TankGame::Direction::Enumeration direction, int time_to_detonation, int tank_id);
         bool FireMissile(int pos_x,int pos_y, Consoden::TankGame::Direction::Enumeration direction, int tank_id);
+        bool MissileActive(int tank_id);
+        bool RedeemerActive(int tank_id);
+
 
         Consoden::TankGame::Direction::Enumeration InvertDirection(Consoden::TankGame::Direction::Enumeration d);
         
